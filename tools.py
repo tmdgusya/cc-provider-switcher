@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import subprocess
 from typing import Any, Dict
 
@@ -15,49 +14,33 @@ logger = logging.getLogger(__name__)
 _config: Dict[str, Any] = {}
 
 
-def _find_claude_binary() -> str:
-    """Locate the claude CLI binary."""
-    path = shutil.which("claude")
-    if path:
-        return path
-    # Common locations
-    for candidate in [
-        os.path.expanduser("~/.npm-global/bin/claude"),
-        "/usr/local/bin/claude",
-        os.path.expanduser("~/.local/bin/claude"),
-    ]:
-        if os.path.isfile(candidate):
-            return candidate
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _find_clean_claude_binary() -> str:
+    """Locate the clean-claude wrapper script."""
+    wrapper = os.path.join(_PLUGIN_DIR, "bin", "clean-claude")
+    if os.path.isfile(wrapper) and os.access(wrapper, os.X_OK):
+        return wrapper
     raise FileNotFoundError(
-        "claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+        f"clean-claude wrapper not found at {wrapper}"
     )
 
 
 def handle_provider_claude_code(args: dict, **kwargs) -> str:
     """Run Claude Code with the specified provider's environment."""
     try:
-        from .providers import build_env_for_provider
-
         provider = args.get("provider", "claude")
         prompt = args.get("prompt", "")
         workdir = args.get("workdir", os.getcwd())
-        model_override = args.get("model")
         skip_perms = args.get("dangerously_skip_permissions", True)
 
         if not prompt:
             return json.dumps({"error": "prompt is required"})
 
-        # Build env with provider-specific variables
-        custom_providers = _config.get("custom_providers", {})
-        env = build_env_for_provider(
-            provider,
-            model_override=model_override,
-            custom_providers=custom_providers,
-        )
-
-        # Build command
-        claude_bin = _find_claude_binary()
-        cmd = [claude_bin]
+        # Build command using clean-claude wrapper
+        clean_claude = _find_clean_claude_binary()
+        cmd = [clean_claude, "--provider", provider]
         if skip_perms:
             cmd.append("--dangerously-skip-permissions")
         cmd.extend(["-p", prompt])
@@ -77,7 +60,6 @@ def handle_provider_claude_code(args: dict, **kwargs) -> str:
         result = subprocess.run(
             cmd,
             cwd=workdir,
-            env=env,
             capture_output=True,
             text=True,
             timeout=timeout,

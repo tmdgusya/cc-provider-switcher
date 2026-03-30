@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# clean-claude — Run claude CLI with a clean or provider-specific environment.
+# Strips inherited ANTHROPIC_* variables, then optionally sets provider-specific ones.
+#
+# Usage:
+#   clean-claude [--provider <name>] [claude args...]
+#   clean-claude -p "hello"                    # native Anthropic
+#   clean-claude --provider kimi -p "hello"    # Kimi provider
+#   clean-claude --provider glm -p "hello"     # GLM provider
+
+set -euo pipefail
+
+# ── Parse --provider flag ──────────────────────────────────────────────────
+
+PROVIDER="claude"
+if [[ "${1:-}" == "--provider" ]]; then
+    PROVIDER="${2:?--provider requires a value}"
+    shift 2
+fi
+
+# ── Step 1: Always clean ANTHROPIC_* variables ─────────────────────────────
+
+unset ANTHROPIC_AUTH_TOKEN 2>/dev/null || true
+unset ANTHROPIC_BASE_URL 2>/dev/null || true
+unset ANTHROPIC_VERSION 2>/dev/null || true
+unset ANTHROPIC_MODEL 2>/dev/null || true
+unset ANTHROPIC_DEFAULT_HAIKU_MODEL 2>/dev/null || true
+unset ANTHROPIC_DEFAULT_SONNET_MODEL 2>/dev/null || true
+unset ANTHROPIC_DEFAULT_OPUS_MODEL 2>/dev/null || true
+unset API_TIMEOUT_MS 2>/dev/null || true
+unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 2>/dev/null || true
+
+# ── Step 2: Set provider-specific variables ────────────────────────────────
+
+case "$PROVIDER" in
+    claude)
+        # Native Anthropic — nothing to set
+        ;;
+    glm)
+        export ANTHROPIC_BASE_URL="${GT_GLM_BASE_URL:-https://api.z.ai/api/anthropic}"
+        export ANTHROPIC_AUTH_TOKEN="${GT_GLM_AUTH_TOKEN:?GT_GLM_AUTH_TOKEN is not set}"
+        export ANTHROPIC_DEFAULT_HAIKU_MODEL="${GT_GLM_HAIKU_MODEL:-glm-4.7-flash}"
+        export ANTHROPIC_DEFAULT_SONNET_MODEL="${GT_GLM_SONNET_MODEL:-glm-5-turbo}"
+        export ANTHROPIC_DEFAULT_OPUS_MODEL="${GT_GLM_OPUS_MODEL:-glm-5.1}"
+        export ANTHROPIC_MODEL="${GT_GLM_OPUS_MODEL:-glm-5.1}"
+        export API_TIMEOUT_MS="${GT_API_TIMEOUT_MS:-3000000}"
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+        ;;
+    kimi)
+        export ANTHROPIC_BASE_URL="${GT_KIMI_BASE_URL:-https://api.kimi.com/coding/}"
+        export ANTHROPIC_AUTH_TOKEN="${GT_KIMI_AUTH_TOKEN:?GT_KIMI_AUTH_TOKEN is not set}"
+        export ANTHROPIC_MODEL="${GT_KIMI_MODEL:-kimi-k2.5}"
+        export API_TIMEOUT_MS="${GT_API_TIMEOUT_MS:-3000000}"
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+        ;;
+    minimax)
+        export ANTHROPIC_BASE_URL="${GT_MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}"
+        export ANTHROPIC_AUTH_TOKEN="${GT_MINIMAX_AUTH_TOKEN:?GT_MINIMAX_AUTH_TOKEN is not set}"
+        export ANTHROPIC_DEFAULT_HAIKU_MODEL="${GT_MINIMAX_SMALL_MODEL:-MiniMax-M2.5}"
+        export ANTHROPIC_DEFAULT_SONNET_MODEL="${GT_MINIMAX_MODEL:-MiniMax-M2.7}"
+        export ANTHROPIC_DEFAULT_OPUS_MODEL="${GT_MINIMAX_MODEL:-MiniMax-M2.7}"
+        export ANTHROPIC_MODEL="${GT_MINIMAX_MODEL:-MiniMax-M2.7}"
+        export API_TIMEOUT_MS="${GT_API_TIMEOUT_MS:-3000000}"
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+        ;;
+    *)
+        echo "error: unknown provider '$PROVIDER'" >&2
+        echo "available: claude, glm, kimi, minimax" >&2
+        exit 1
+        ;;
+esac
+
+# ── Step 3: Find and exec claude ───────────────────────────────────────────
+
+CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+if [[ -z "$CLAUDE_BIN" ]]; then
+    for candidate in "$HOME/.npm-global/bin/claude" "$HOME/.local/bin/claude" "/usr/local/bin/claude"; do
+        if [[ -x "$candidate" ]]; then
+            CLAUDE_BIN="$candidate"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$CLAUDE_BIN" ]]; then
+    echo "error: claude CLI not found" >&2
+    exit 1
+fi
+
+exec "$CLAUDE_BIN" "$@"
